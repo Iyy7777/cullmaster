@@ -1,0 +1,780 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CullMaster Pro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'] },
+                    colors: {
+                        zinc: { 850: '#202022', 950: '#09090b' }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #09090b; color: #e4e4e7; overflow: hidden; }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        
+        .status-keep { border: 2px solid #22c55e; } 
+        .status-reject { border: 2px solid #ef4444; opacity: 0.5; }
+        .status-unrated { border: 2px solid transparent; }
+        
+        .img-grid-item { transition: transform 0.1s ease; }
+        .img-grid-item:hover { transform: scale(1.02); z-index: 10; }
+        
+        input[type=range] {
+            -webkit-appearance: none; width: 100%; background: transparent; margin: 8px 0;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none; height: 16px; width: 16px; border-radius: 50%;
+            background: #a855f7; cursor: pointer; margin-top: -6px; box-shadow: 0 0 5px rgba(0,0,0,0.5);
+        }
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%; height: 4px; cursor: pointer; background: #3f3f46; border-radius: 2px;
+        }
+        
+        #vignette-overlay { pointer-events: none; mix-blend-mode: multiply; }
+    </style>
+</head>
+<body class="h-screen w-full flex flex-col">
+
+    <!-- Hidden SVG for Sharpen Filter -->
+    <svg xmlns="http://www.w3.org/2000/svg" style="position: absolute; width: 0; height: 0;" aria-hidden="true">
+        <filter id="sharpen-filter">
+            <feConvolveMatrix id="sharpen-matrix" order="3" preserveAlpha="true" kernelMatrix="0 0 0 0 1 0 0 0 0"/>
+        </filter>
+    </svg>
+
+    <header class="flex-none bg-zinc-900 border-b border-zinc-800 px-6 py-3 flex items-center justify-between z-20">
+        <div class="flex items-center space-x-3">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#a855f7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg>
+            <h1 class="text-xl font-bold tracking-tight text-white cursor-pointer" onclick="closeDetailView()">CullMaster <span class="text-purple-500">Pro</span></h1>
+        </div>
+
+        <div class="flex items-center space-x-2 bg-zinc-800 p-1 rounded-lg">
+            <button onclick="setFilter('all')" id="btn-filter-all" class="filter-btn px-4 py-1.5 text-sm font-medium rounded-md bg-zinc-700 text-white transition-colors">All (<span id="count-all">0</span>)</button>
+            <button onclick="setFilter('unrated')" id="btn-filter-unrated" class="filter-btn px-4 py-1.5 text-sm font-medium rounded-md text-zinc-400 hover:text-white transition-colors">Unrated (<span id="count-unrated">0</span>)</button>
+            <button onclick="setFilter('keep')" id="btn-filter-keep" class="filter-btn px-4 py-1.5 text-sm font-medium rounded-md text-zinc-400 hover:text-white transition-colors">Kept (<span id="count-keep">0</span>)</button>
+            <button onclick="setFilter('reject')" id="btn-filter-reject" class="filter-btn px-4 py-1.5 text-sm font-medium rounded-md text-zinc-400 hover:text-white transition-colors">Rejected (<span id="count-reject">0</span>)</button>
+        </div>
+
+        <div class="flex items-center space-x-3">
+            <button onclick="runAutoCull()" class="bg-zinc-800 hover:bg-zinc-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors border border-zinc-700">
+                Auto Cull
+            </button>
+            <input type="file" id="file-input" multiple accept="image/*" class="hidden">
+            <button onclick="document.getElementById('file-input').click()" class="bg-purple-600 hover:bg-purple-500 text-white px-5 py-2 rounded-lg text-sm font-semibold transition-colors shadow-lg shadow-purple-500/20">
+                Import Photos
+            </button>
+        </div>
+    </header>
+
+    <div class="flex-1 flex overflow-hidden relative">
+        
+        <!-- Main Grid View -->
+        <main id="grid-view" class="flex-1 overflow-y-auto p-6 bg-zinc-950 hide-scrollbar">
+            <div id="empty-state" class="h-full flex flex-col items-center justify-center text-zinc-500">
+                <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" class="mb-4"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                <h2 class="text-xl font-medium text-zinc-400 mb-2">No photos imported</h2>
+                <p class="text-sm">Import photos to start culling and editing.</p>
+            </div>
+            <div id="photo-grid" class="hidden grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 pb-10"></div>
+        </main>
+
+        <!-- Detail View (Hidden by default) -->
+        <main id="detail-view" class="hidden flex-1 flex flex-col bg-zinc-950 overflow-hidden relative">
+            
+            <!-- Toolbar -->
+            <div class="flex justify-between items-center px-4 py-2 bg-zinc-900 border-b border-zinc-800">
+                <button onclick="closeDetailView()" class="text-zinc-400 hover:text-white text-sm font-medium flex items-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+                    Back to Grid
+                </button>
+                <div class="flex space-x-2">
+                    <button onclick="rateCurrent('reject')" class="px-3 py-1.5 rounded bg-zinc-800 hover:bg-red-900/50 text-red-400 text-xs font-semibold border border-zinc-700">Reject (X)</button>
+                    <button onclick="rateCurrent('keep')" class="px-3 py-1.5 rounded bg-zinc-800 hover:bg-green-900/50 text-green-400 text-xs font-semibold border border-zinc-700">Keep (K)</button>
+                </div>
+            </div>
+
+            <!-- Image Canvas Area -->
+            <div class="flex-1 relative flex justify-center items-center overflow-hidden p-4" id="canvas-container">
+                <div class="relative w-full h-full flex justify-center items-center">
+                    <img id="main-image" src="" class="absolute max-w-full max-h-full object-contain pointer-events-none" style="z-index: 1;">
+                    <canvas id="clone-canvas" class="absolute max-w-full max-h-full object-contain pointer-events-none" style="z-index: 2;"></canvas>
+                    <div id="vignette-overlay" class="absolute inset-0 z-10" style="background: radial-gradient(circle, transparent 50%, rgba(0,0,0,0) 100%);"></div>
+                    <canvas id="interaction-canvas" class="absolute inset-0 w-full h-full z-20 cursor-crosshair"></canvas>
+                </div>
+                
+                <!-- Navigation Arrows -->
+                <button onclick="navPrev()" class="absolute left-4 top-1/2 -translate-y-1/2 p-3 bg-black/50 hover:bg-black text-white rounded-full z-30"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"></polyline></svg></button>
+                <button onclick="navNext()" class="absolute right-4 top-1/2 -translate-y-1/2 p-3 bg-black/50 hover:bg-black text-white rounded-full z-30"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"></polyline></svg></button>
+            </div>
+
+            <!-- Bottom Filmstrip -->
+            <div class="h-24 bg-zinc-900 border-t border-zinc-800 flex items-center px-2 space-x-2 overflow-x-auto hide-scrollbar" id="filmstrip"></div>
+        </main>
+
+        <!-- Right Sidebar (Adjustments) -->
+        <aside id="adjustments-panel" class="hidden w-80 bg-zinc-900 border-l border-zinc-800 flex-col overflow-y-auto hide-scrollbar">
+            <div class="p-4 border-b border-zinc-800">
+                <h3 class="text-sm font-semibold text-white uppercase tracking-wider mb-3">Tools</h3>
+                <div class="grid grid-cols-2 gap-2 mb-3">
+                    <button onclick="runAutoEdit()" class="py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-medium rounded border border-zinc-700 transition">Auto Edit</button>
+                    <button onclick="undoEdit()" id="btn-undo" class="py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-medium rounded border border-zinc-700 transition opacity-50 cursor-not-allowed">Undo</button>
+                </div>
+                <button id="btn-clone-tool" onclick="toggleCloneTool()" class="w-full py-2 bg-zinc-800 hover:bg-purple-900 hover:text-purple-300 text-zinc-300 text-xs font-medium rounded border border-zinc-700 transition flex justify-center items-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-2"><circle cx="13.5" cy="13.5" r="5.5"/><path d="m14 8-1.5-4.5"/><path d="M12.5 17.5 11 22"/><path d="m8 14-4.5-1.5"/><path d="M17.5 12.5 22 11"/><path d="m10.5 10.5-2.5-2.5"/><path d="m13.5 16.5 2.5 2.5"/><path d="m10.5 16.5-2.5 2.5"/><path d="m13.5 10.5 2.5-2.5"/></svg>
+                    Clone Brush (Off)
+                </button>
+                <p id="clone-hint" class="text-[10px] text-zinc-500 mt-2 hidden text-center">Shift+Click to sample area, then drag to paint.</p>
+            </div>
+
+            <div class="p-4 space-y-5" id="slider-container">
+                <!-- Sliders injected here via JS to avoid repetition and ensure scope safety -->
+            </div>
+            
+            <div class="p-4 mt-auto border-t border-zinc-800">
+                <button onclick="resetEdits()" class="w-full py-2 text-zinc-400 hover:text-white text-xs font-medium transition">Reset All Edits</button>
+            </div>
+        </aside>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="fixed inset-0 bg-black/90 z-50 hidden flex-col items-center justify-center">
+        <svg class="animate-spin h-10 w-10 text-purple-500 mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+        <p id="loading-text" class="text-white font-medium">Processing...</p>
+        <p id="loading-progress" class="text-zinc-400 text-sm mt-2">0 / 0</p>
+    </div>
+
+    <script>
+        // --- State Management ---
+        let photos = [];
+        let filteredPhotos = [];
+        let currentFilter = 'all';
+        let viewMode = 'grid'; // 'grid' or 'detail'
+        let currentIndex = 0; // Index in filteredPhotos
+        
+        // Tool States
+        let isCloneToolActive = false;
+        let cloneSource = null;
+        let isDrawing = false;
+        
+        // Define Default Edits structure
+        const getDefaultEdits = () => ({
+            exposure: 0, contrast: 0, highlights: 0, shadows: 0, 
+            saturation: 0, temperature: 0, vignette: 0, sharpen: 0
+        });
+
+        const SLIDER_CONFIG = [
+            { id: 'exposure', label: 'Exposure', min: -100, max: 100 },
+            { id: 'contrast', label: 'Contrast', min: -100, max: 100 },
+            { id: 'highlights', label: 'Highlights', min: -100, max: 100 },
+            { id: 'shadows', label: 'Shadows', min: -100, max: 100 },
+            { id: 'saturation', label: 'Saturation', min: -100, max: 100 },
+            { id: 'temperature', label: 'Temperature', min: -100, max: 100 },
+            { id: 'sharpen', label: 'Sharpen', min: 0, max: 100 },
+            { id: 'vignette', label: 'Vignette', min: 0, max: 100 }
+        ];
+
+        // --- DOM Elements ---
+        const DOM = {
+            grid: document.getElementById('photo-grid'),
+            empty: document.getElementById('empty-state'),
+            detailView: document.getElementById('detail-view'),
+            gridView: document.getElementById('grid-view'),
+            adjustments: document.getElementById('adjustments-panel'),
+            mainImg: document.getElementById('main-image'),
+            cloneCanvas: document.getElementById('clone-canvas'),
+            interactionCanvas: document.getElementById('interaction-canvas'),
+            vignetteOverlay: document.getElementById('vignette-overlay'),
+            filmstrip: document.getElementById('filmstrip'),
+            loading: document.getElementById('loading-overlay'),
+            loadText: document.getElementById('loading-text'),
+            loadProg: document.getElementById('loading-progress'),
+            sliderContainer: document.getElementById('slider-container'),
+            btnUndo: document.getElementById('btn-undo'),
+            btnClone: document.getElementById('btn-clone-tool'),
+            cloneHint: document.getElementById('clone-hint'),
+            fileInput: document.getElementById('file-input')
+        };
+
+        const ctxClone = DOM.cloneCanvas.getContext('2d', { willReadFrequently: true });
+
+        // --- Initialization & Setup ---
+        function init() {
+            // Generate Sliders dynamically to avoid HTML clutter and safely bind events
+            SLIDER_CONFIG.forEach(cfg => {
+                const div = document.createElement('div');
+                div.innerHTML = `
+                    <div class="flex justify-between text-xs mb-1">
+                        <label class="text-zinc-300">${cfg.label}</label>
+                        <span id="val-${cfg.id}" class="text-zinc-500 font-mono">0</span>
+                    </div>
+                    <input type="range" id="slider-${cfg.id}" data-id="${cfg.id}" min="${cfg.min}" max="${cfg.max}" value="0">
+                `;
+                DOM.sliderContainer.appendChild(div);
+                
+                const slider = document.getElementById(`slider-${cfg.id}`);
+                
+                // Save history on mouse down (before changing)
+                slider.addEventListener('mousedown', saveHistoryState);
+                slider.addEventListener('touchstart', saveHistoryState, {passive: true});
+                
+                // Update live as slider moves
+                slider.addEventListener('input', (e) => {
+                    document.getElementById(`val-${cfg.id}`).innerText = e.target.value;
+                    applyEditsFromSliders();
+                });
+            });
+
+            // Bind File Input
+            DOM.fileInput.addEventListener('change', handleFiles);
+            
+            // Setup Canvas drawing listeners
+            setupCanvasInteractions();
+            
+            // Setup Keyboard shortcuts
+            window.addEventListener('keydown', handleKeyboard);
+        }
+
+        // --- File Import ---
+        async function handleFiles(e) {
+            const files = Array.from(e.target.files);
+            if (!files.length) return;
+
+            showLoading("Importing photos...", 0, files.length);
+
+            for (let i = 0; i < files.length; i++) {
+                const url = URL.createObjectURL(files[i]);
+                photos.push({
+                    id: 'p_' + Date.now() + '_' + i,
+                    file: files[i],
+                    url: url,
+                    status: 'unrated',
+                    edits: getDefaultEdits(),
+                    history: [],
+                    cloneData: null // Stores canvas dataURL
+                });
+                updateLoadingProg(i + 1, files.length);
+            }
+
+            hideLoading();
+            updateStats();
+            setFilter('unrated'); // Switch to unrated view automatically
+            DOM.empty.classList.add('hidden');
+            DOM.grid.classList.remove('hidden');
+            DOM.fileInput.value = ''; // Reset input
+        }
+
+        // --- UI Updates & Navigation ---
+        function updateStats() {
+            const counts = { all: photos.length, unrated: 0, keep: 0, reject: 0 };
+            photos.forEach(p => counts[p.status]++);
+            Object.keys(counts).forEach(k => {
+                const el = document.getElementById(`count-${k}`);
+                if (el) el.innerText = counts[k];
+            });
+        }
+
+        function setFilter(type) {
+            currentFilter = type;
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                btn.classList.replace('bg-zinc-700', 'text-zinc-400');
+                btn.classList.remove('text-white');
+            });
+            const active = document.getElementById(`btn-filter-${type}`);
+            if (active) {
+                active.classList.replace('text-zinc-400', 'bg-zinc-700');
+                active.classList.add('text-white');
+            }
+            
+            filteredPhotos = currentFilter === 'all' ? [...photos] : photos.filter(p => p.status === currentFilter);
+            
+            if (viewMode === 'grid') renderGrid();
+            else {
+                if (filteredPhotos.length === 0) closeDetailView();
+                else {
+                    currentIndex = 0;
+                    loadDetailView();
+                }
+            }
+        }
+
+        function renderGrid() {
+            DOM.grid.innerHTML = '';
+            filteredPhotos.forEach((photo, idx) => {
+                const el = document.createElement('div');
+                el.className = `img-grid-item relative aspect-[3/2] bg-zinc-900 rounded-lg overflow-hidden cursor-pointer status-${photo.status}`;
+                el.innerHTML = `<img src="${photo.url}" class="w-full h-full object-cover">`;
+                el.onclick = () => openDetailView(idx);
+                DOM.grid.appendChild(el);
+            });
+        }
+
+        function openDetailView(idx) {
+            currentIndex = idx;
+            viewMode = 'detail';
+            DOM.gridView.classList.add('hidden');
+            DOM.detailView.classList.remove('hidden');
+            DOM.detailView.classList.add('flex');
+            DOM.adjustments.classList.remove('hidden');
+            DOM.adjustments.classList.add('flex');
+            loadDetailView();
+        }
+
+        function closeDetailView() {
+            viewMode = 'grid';
+            DOM.detailView.classList.add('hidden');
+            DOM.detailView.classList.remove('flex');
+            DOM.adjustments.classList.add('hidden');
+            DOM.adjustments.classList.remove('flex');
+            DOM.gridView.classList.remove('hidden');
+            renderGrid();
+        }
+
+        function loadDetailView() {
+            if (!filteredPhotos[currentIndex]) return;
+            const photo = filteredPhotos[currentIndex];
+            
+            // Load image into main view
+            DOM.mainImg.src = photo.url;
+            
+            // Sync image to clone canvas to match dimensions once loaded
+            DOM.mainImg.onload = () => {
+                DOM.cloneCanvas.width = DOM.mainImg.naturalWidth;
+                DOM.cloneCanvas.height = DOM.mainImg.naturalHeight;
+                // Load existing clone data if any
+                ctxClone.clearRect(0, 0, DOM.cloneCanvas.width, DOM.cloneCanvas.height);
+                if (photo.cloneData) {
+                    const img = new Image();
+                    img.onload = () => ctxClone.drawImage(img, 0, 0);
+                    img.src = photo.cloneData;
+                }
+                syncInteractionCanvas();
+            };
+
+            updateSlidersUI(photo.edits);
+            applyCSSFilters(photo.edits);
+            renderFilmstrip();
+            checkUndoState();
+        }
+
+        function syncInteractionCanvas() {
+            // Match dimensions of the visible image for correct mouse coordinates
+            const rect = DOM.mainImg.getBoundingClientRect();
+            DOM.interactionCanvas.style.width = rect.width + 'px';
+            DOM.interactionCanvas.style.height = rect.height + 'px';
+            DOM.interactionCanvas.width = DOM.mainImg.naturalWidth;
+            DOM.interactionCanvas.height = DOM.mainImg.naturalHeight;
+        }
+
+        function renderFilmstrip() {
+            DOM.filmstrip.innerHTML = '';
+            filteredPhotos.forEach((p, idx) => {
+                const img = document.createElement('img');
+                img.src = p.url;
+                img.className = `h-16 w-24 object-cover rounded cursor-pointer opacity-50 hover:opacity-100 transition status-${p.status}`;
+                if (idx === currentIndex) {
+                    img.classList.remove('opacity-50');
+                    img.classList.add('ring-2', 'ring-purple-500');
+                }
+                img.onclick = () => { currentIndex = idx; loadDetailView(); };
+                DOM.filmstrip.appendChild(img);
+            });
+            // Scroll selected into view
+            const selected = DOM.filmstrip.children[currentIndex];
+            if (selected) selected.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+        }
+
+        function navNext() { if (currentIndex < filteredPhotos.length - 1) { currentIndex++; loadDetailView(); } }
+        function navPrev() { if (currentIndex > 0) { currentIndex--; loadDetailView(); } }
+
+        function rateCurrent(status) {
+            if (viewMode !== 'detail' || !filteredPhotos[currentIndex]) return;
+            const photo = filteredPhotos[currentIndex];
+            photo.status = (photo.status === status) ? 'unrated' : status;
+            updateStats();
+            renderFilmstrip();
+            if (photo.status !== 'unrated') navNext();
+        }
+
+        // --- Editing Logic ---
+        function updateSlidersUI(edits) {
+            SLIDER_CONFIG.forEach(cfg => {
+                const el = document.getElementById(`slider-${cfg.id}`);
+                const valEl = document.getElementById(`val-${cfg.id}`);
+                if (el && valEl) {
+                    el.value = edits[cfg.id];
+                    valEl.innerText = edits[cfg.id];
+                }
+            });
+        }
+
+        function applyEditsFromSliders() {
+            if (viewMode !== 'detail' || !filteredPhotos[currentIndex]) return;
+            const photo = filteredPhotos[currentIndex];
+            
+            SLIDER_CONFIG.forEach(cfg => {
+                photo.edits[cfg.id] = parseInt(document.getElementById(`slider-${cfg.id}`).value);
+            });
+            
+            applyCSSFilters(photo.edits);
+            checkUndoState();
+        }
+
+        function applyCSSFilters(edits) {
+            // Map our custom sliders to CSS filter properties
+            let filterStr = `
+                brightness(${100 + edits.exposure}%) 
+                contrast(${100 + edits.contrast}%) 
+                saturate(${100 + edits.saturation}%)
+            `;
+            
+            // Faux highlights/shadows via brightness/contrast tweaking
+            if (edits.highlights !== 0 || edits.shadows !== 0) {
+                 filterStr += ` brightness(${100 + (edits.shadows * 0.3) + (edits.highlights * 0.2)}%)`;
+            }
+
+            // Temperature (Yellow/Blue tint)
+            if (edits.temperature > 0) {
+                filterStr += ` sepia(${edits.temperature * 0.5}%) hue-rotate(-15deg)`;
+            } else if (edits.temperature < 0) {
+                filterStr += ` sepia(${Math.abs(edits.temperature) * 0.5}%) hue-rotate(180deg) saturate(120%)`;
+            }
+
+            // Handle Sharpening via dynamic SVG filter
+            if (edits.sharpen > 0) {
+                const s = edits.sharpen / 100; // scale 0 to 1
+                const edge = -s;
+                const center = 1 + (4 * s);
+                // Dynamically updates the SVG matrix interpolation
+                const matrixStr = `0 ${edge} 0 ${edge} ${center} ${edge} 0 ${edge} 0`;
+                document.getElementById('sharpen-matrix').setAttribute('kernelMatrix', matrixStr);
+                filterStr += ` url(#sharpen-filter)`;
+            }
+
+            DOM.mainImg.style.filter = filterStr;
+            DOM.cloneCanvas.style.filter = filterStr;
+
+            // Apply Vignette
+            const v = edits.vignette / 100;
+            DOM.vignetteOverlay.style.background = `radial-gradient(circle, transparent ${60 - (v*20)}%, rgba(0,0,0,${v * 0.8}) 100%)`;
+        }
+
+        // --- Auto Edit Logic ---
+        function runAutoEdit() {
+            if (viewMode !== 'detail' || !filteredPhotos[currentIndex]) return;
+            saveHistoryState();
+            
+            const photo = filteredPhotos[currentIndex];
+            const img = DOM.mainImg;
+            
+            // Simple logic: Draw to tiny canvas, get average brightness, adjust exposure to reach ideal middle-gray
+            const c = document.createElement('canvas');
+            c.width = 64; c.height = 64;
+            const ctx = c.getContext('2d');
+            ctx.drawImage(img, 0, 0, 64, 64);
+            const data = ctx.getImageData(0, 0, 64, 64).data;
+            
+            let r=0, g=0, b=0;
+            for(let i=0; i<data.length; i+=4){ r+=data[i]; g+=data[i+1]; b+=data[i+2]; }
+            const pixels = data.length / 4;
+            const avgLuminance = (0.299*(r/pixels) + 0.587*(g/pixels) + 0.114*(b/pixels)); // 0-255
+            
+            // Target luminance ~ 128
+            const diff = 128 - avgLuminance;
+            
+            // Set values
+            photo.edits.exposure = Math.max(-50, Math.min(50, Math.round(diff * 0.5)));
+            photo.edits.contrast = 10; // slightly boost contrast automatically
+            photo.edits.shadows = avgLuminance < 100 ? 15 : 0; // bump shadows if dark overall
+            photo.edits.saturation = 5;
+
+            updateSlidersUI(photo.edits);
+            applyCSSFilters(photo.edits);
+        }
+
+        // --- Undo / History System ---
+        function saveHistoryState() {
+            if (!filteredPhotos[currentIndex]) return;
+            const photo = filteredPhotos[currentIndex];
+            
+            // Limit stack to 15 states to save memory
+            if (photo.history.length > 15) photo.history.shift();
+            
+            // Deep copy edits
+            const editsCopy = { ...photo.edits };
+            // Save current clone canvas state
+            const cloneDataCopy = DOM.cloneCanvas.toDataURL('image/png');
+            
+            photo.history.push({ edits: editsCopy, cloneData: cloneDataCopy });
+            checkUndoState();
+        }
+
+        function checkUndoState() {
+            if (!filteredPhotos[currentIndex]) return;
+            const hasHistory = filteredPhotos[currentIndex].history.length > 0;
+            DOM.btnUndo.classList.toggle('opacity-50', !hasHistory);
+            DOM.btnUndo.classList.toggle('cursor-not-allowed', !hasHistory);
+        }
+
+        function undoEdit() {
+            if (viewMode !== 'detail' || !filteredPhotos[currentIndex]) return;
+            const photo = filteredPhotos[currentIndex];
+            
+            if (photo.history.length === 0) return;
+            
+            const lastState = photo.history.pop();
+            
+            // Restore Edits
+            photo.edits = { ...lastState.edits };
+            updateSlidersUI(photo.edits);
+            applyCSSFilters(photo.edits);
+            
+            // Restore Canvas
+            photo.cloneData = lastState.cloneData;
+            ctxClone.clearRect(0, 0, DOM.cloneCanvas.width, DOM.cloneCanvas.height);
+            if (photo.cloneData) {
+                const img = new Image();
+                img.onload = () => ctxClone.drawImage(img, 0, 0);
+                img.src = photo.cloneData;
+            }
+            
+            checkUndoState();
+        }
+
+        function resetEdits() {
+            if (!filteredPhotos[currentIndex]) return;
+            saveHistoryState();
+            const photo = filteredPhotos[currentIndex];
+            photo.edits = getDefaultEdits();
+            ctxClone.clearRect(0,0, DOM.cloneCanvas.width, DOM.cloneCanvas.height);
+            photo.cloneData = null;
+            updateSlidersUI(photo.edits);
+            applyCSSFilters(photo.edits);
+        }
+
+        // --- Clone / Heal Brush Logic ---
+        function toggleCloneTool() {
+            isCloneToolActive = !isCloneToolActive;
+            
+            if (isCloneToolActive) {
+                DOM.btnClone.classList.replace('bg-zinc-800', 'bg-purple-600');
+                DOM.btnClone.classList.replace('text-zinc-300', 'text-white');
+                DOM.btnClone.innerHTML = 'Clone Brush (On)';
+                DOM.cloneHint.classList.remove('hidden');
+                DOM.interactionCanvas.style.pointerEvents = 'auto'; // Enable drawing layer
+            } else {
+                DOM.btnClone.classList.replace('bg-purple-600', 'bg-zinc-800');
+                DOM.btnClone.classList.replace('text-white', 'text-zinc-300');
+                DOM.btnClone.innerHTML = 'Clone Brush (Off)';
+                DOM.cloneHint.classList.add('hidden');
+                DOM.interactionCanvas.style.pointerEvents = 'none'; // Disable drawing layer
+                cloneSource = null;
+            }
+        }
+
+        function setupCanvasInteractions() {
+            const canvas = DOM.interactionCanvas;
+            const ctxInt = canvas.getContext('2d');
+            let lastX = 0, lastY = 0;
+
+            // Handle window resize to sync canvases
+            window.addEventListener('resize', () => {
+                if(viewMode === 'detail') syncInteractionCanvas();
+            });
+
+            canvas.addEventListener('mousedown', (e) => {
+                if (!isCloneToolActive) return;
+                
+                const rect = canvas.getBoundingClientRect();
+                // Map screen coordinates to actual image dimensions
+                const scaleX = canvas.width / rect.width;
+                const scaleY = canvas.height / rect.height;
+                const x = (e.clientX - rect.left) * scaleX;
+                const y = (e.clientY - rect.top) * scaleY;
+
+                if (e.shiftKey) {
+                    // Set source
+                    cloneSource = { x, y };
+                    // Draw visual marker
+                    ctxInt.clearRect(0,0, canvas.width, canvas.height);
+                    ctxInt.beginPath();
+                    ctxInt.arc(x, y, 20, 0, Math.PI*2);
+                    ctxInt.strokeStyle = '#00ff00';
+                    ctxInt.lineWidth = 2;
+                    ctxInt.stroke();
+                    setTimeout(() => ctxInt.clearRect(0,0, canvas.width, canvas.height), 500);
+                    return;
+                }
+
+                if (!cloneSource) {
+                    alert("Hold Shift and Click somewhere to set the clone source first.");
+                    return;
+                }
+
+                isDrawing = true;
+                lastX = x; lastY = y;
+                saveHistoryState(); // Save state before drawing
+            });
+
+            canvas.addEventListener('mousemove', (e) => {
+                if (!isDrawing || !isCloneToolActive || e.shiftKey) return;
+
+                const rect = canvas.getBoundingClientRect();
+                const scaleX = canvas.width / rect.width;
+                const scaleY = canvas.height / rect.height;
+                const x = (e.clientX - rect.left) * scaleX;
+                const y = (e.clientY - rect.top) * scaleY;
+
+                // Move the source relative to mouse movement
+                const dx = x - lastX;
+                const dy = y - lastY;
+                cloneSource.x += dx;
+                cloneSource.y += dy;
+
+                // Draw to clone canvas
+                const brushSize = 30;
+                ctxClone.save();
+                ctxClone.beginPath();
+                ctxClone.arc(x, y, brushSize/2, 0, Math.PI*2);
+                ctxClone.clip();
+                
+                // Draw image from source coords to current coords
+                // Use the original image as source to prevent infinite recursion trails
+                ctxClone.drawImage(DOM.mainImg, 
+                    cloneSource.x - brushSize/2, cloneSource.y - brushSize/2, brushSize, brushSize,
+                    x - brushSize/2, y - brushSize/2, brushSize, brushSize
+                );
+                ctxClone.restore();
+
+                lastX = x; lastY = y;
+            });
+
+            window.addEventListener('mouseup', () => {
+                if (isDrawing) {
+                    isDrawing = false;
+                    // Save the resulting canvas to the photo object for reloading
+                    if (filteredPhotos[currentIndex]) {
+                        filteredPhotos[currentIndex].cloneData = DOM.cloneCanvas.toDataURL('image/png');
+                    }
+                }
+            });
+        }
+
+        // --- Auto Cull (Blur Detection) Logic ---
+        async function runAutoCull() {
+            const unratedPhotos = photos.filter(p => p.status === 'unrated');
+            if (unratedPhotos.length === 0) {
+                alert("No unrated photos to cull.");
+                return;
+            }
+
+            showLoading("Analyzing focus...", 0, unratedPhotos.length);
+            let processed = 0;
+
+            for (const photo of unratedPhotos) {
+                // Async image load and process to prevent UI freezing
+                await new Promise((resolve) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        const score = calculateBlurScore(img);
+                        photo.status = score < 150 ? 'reject' : 'keep'; // Threshold
+                        resolve();
+                    };
+                    img.src = photo.url;
+                });
+                processed++;
+                updateLoadingProg(processed, unratedPhotos.length);
+            }
+
+            hideLoading();
+            updateStats();
+            setFilter(currentFilter); // Refresh current view
+        }
+
+        function calculateBlurScore(imgElement) {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d', { willReadFrequently: true });
+            
+            // Scale down drastically for speed
+            const maxDim = 300;
+            const scale = Math.min(maxDim / imgElement.width, maxDim / imgElement.height);
+            canvas.width = imgElement.width * scale;
+            canvas.height = imgElement.height * scale;
+            
+            ctx.drawImage(imgElement, 0, 0, canvas.width, canvas.height);
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const data = imageData.data;
+            const width = canvas.width;
+            const height = canvas.height;
+
+            const gray = new Uint8ClampedArray(width * height);
+            for (let i = 0; i < data.length; i += 4) {
+                gray[i/4] = 0.299*data[i] + 0.587*data[i+1] + 0.114*data[i+2];
+            }
+
+            const laplacian = new Float32Array(width * height);
+            let sum = 0;
+            for (let y = 1; y < height - 1; y++) {
+                for (let x = 1; x < width - 1; x++) {
+                    const i = y * width + x;
+                    const val = gray[i - width] + gray[i - 1] + gray[i + 1] + gray[i + width] - (4 * gray[i]);
+                    laplacian[i] = val;
+                    sum += val;
+                }
+            }
+
+            const mean = sum / (width * height);
+            let varianceSum = 0;
+            for (let i = 0; i < laplacian.length; i++) {
+                varianceSum += Math.pow(laplacian[i] - mean, 2);
+            }
+            return varianceSum / (width * height);
+        }
+
+        // --- Utilities ---
+        function showLoading(text, current, total) {
+            DOM.loadText.innerText = text;
+            updateLoadingProg(current, total);
+            DOM.loading.classList.remove('hidden');
+            DOM.loading.classList.add('flex');
+        }
+        function updateLoadingProg(current, total) { DOM.loadProg.innerText = `${current} / ${total}`; }
+        function hideLoading() {
+            DOM.loading.classList.add('hidden');
+            DOM.loading.classList.remove('flex');
+        }
+
+        function handleKeyboard(e) {
+            if (viewMode !== 'detail') return;
+            // Ignore if typing in an input (not applicable here, but good practice)
+            if (['INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
+
+            switch(e.key.toLowerCase()) {
+                case 'arrowright': navNext(); break;
+                case 'arrowleft': navPrev(); break;
+                case 'k': rateCurrent('keep'); break;
+                case 'x': rateCurrent('reject'); break;
+                case 'escape': closeDetailView(); break;
+                case 'z':
+                    if (e.ctrlKey || e.metaKey) undoEdit();
+                    break;
+            }
+        }
+
+        // Boot
+        window.onload = init;
+
+    </script>
+</body>
+</html>
